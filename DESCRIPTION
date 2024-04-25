@@ -1,9 +1,30 @@
 Package: evt-anestesia
-Title: What the Package Does (One Line, Title Case)
+Title: EVT anestesia evaluation at AUH
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"),
-           comment = c(ORCID = "YOUR-ORCID-ID"))
+    person("Andreas Gammelgaard", "Damsbo", , "agdamsbo@clin.au.dk", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-7559-1154"))
+Imports: 
+    here,
+    keyring,
+    quarto,
+    knitr,
+    rmarkdown,
+    dplyr,
+    REDCapCAST,
+    REDCapR,
+    pak,
+    renv,
+    styler,
+    gitcreds,
+    roxygen2,
+    remotes,
+    gt,
+    usethis,
+    tidyverse,
+    targets,
+    patchwork,
+    skimr
 Description: What the package does (one paragraph).
 License: CC BY 4.0
 Encoding: UTF-8

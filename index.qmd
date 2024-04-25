@@ -1,0 +1,47 @@
+---
+title: "Project overview"
+format: docx
+editor: source
+---
+
+## EVT anestesia evaluation
+
+```{r}
+source(here::here("R/functions.R"))
+```
+
+```{r}
+#| include: true
+#| eval: true
+#| echo: true
+#| code-fold: true
+ds <- targets::tar_read("df_evt_minimal") |> 
+  dplyr::mutate(year=format(trombektdato_basisske,"%Y"),
+                ymonth=format(trombektdato_basisske,"%Y-%m"),
+                month=format(trombektdato_basisske,"%m")) 
+
+skimr::skim(ds)
+```
+
+```{r}
+#| include: true
+#| eval: true
+#| echo: true
+#| code-fold: true
+list(stacked=ds |> 
+  dplyr::count(year,month) |> 
+  ggplot2::ggplot(ggplot2::aes(x=month,y=n,fill=year))+
+  ggplot2::geom_col(),
+side=ds |> 
+  dplyr::count(year,ymonth) |> 
+  ggplot2::ggplot(ggplot2::aes(x=ymonth,y=n,fill=year))+
+  ggplot2::geom_col()) |> 
+  patchwork::wrap_plots(ncol=1,guides="collect") + 
+  patchwork::plot_annotation(title = "EVT cases by year")
+```
+
+```{r}
+ds <- targets::tar_read("df_evt_basis")
+```
+
+Hmm. Vi mangler CPR på ptt. Måske de kan reddes, men nok ikke. Vi har navne, så de kan slås op.
