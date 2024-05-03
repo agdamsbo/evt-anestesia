@@ -24,7 +24,10 @@ Imports:
     tidyverse,
     targets,
     patchwork,
-    skimr
+    skimr,
+    officer,
+    snakecase,
+    stringr
 Description: What the package does (one paragraph).
 License: CC BY 4.0
 Encoding: UTF-8

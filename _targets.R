@@ -58,6 +58,7 @@ list(
   tar_target(
     name = df_evt_basis,
     command = evt_basis_data(df_evt_minimal),
+    # cue = targets::tar_cue(mode="always"),
     description = "Basic data for EVT database"
   )
 )

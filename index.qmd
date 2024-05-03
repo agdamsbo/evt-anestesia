@@ -1,6 +1,6 @@
 ---
 title: "Project overview"
-format: docx
+format: html
 editor: source
 ---
 
@@ -15,10 +15,12 @@ source(here::here("R/functions.R"))
 #| eval: true
 #| echo: true
 #| code-fold: true
-ds <- targets::tar_read("df_evt_minimal") |> 
-  dplyr::mutate(year=format(trombektdato_basisske,"%Y"),
-                ymonth=format(trombektdato_basisske,"%Y-%m"),
-                month=format(trombektdato_basisske,"%m")) 
+ds <- targets::tar_read("df_evt_minimal") |>
+  dplyr::mutate(
+    year = format(trombektdato_basisske, "%Y"),
+    ymonth = format(trombektdato_basisske, "%Y-%m"),
+    month = format(trombektdato_basisske, "%m")
+  )
 
 skimr::skim(ds)
 ```
@@ -28,20 +30,139 @@ skimr::skim(ds)
 #| eval: true
 #| echo: true
 #| code-fold: true
-list(stacked=ds |> 
-  dplyr::count(year,month) |> 
-  ggplot2::ggplot(ggplot2::aes(x=month,y=n,fill=year))+
-  ggplot2::geom_col(),
-side=ds |> 
-  dplyr::count(year,ymonth) |> 
-  ggplot2::ggplot(ggplot2::aes(x=ymonth,y=n,fill=year))+
-  ggplot2::geom_col()) |> 
-  patchwork::wrap_plots(ncol=1,guides="collect") + 
+list(
+  stacked = ds |>
+    dplyr::count(year, month) |>
+    ggplot2::ggplot(ggplot2::aes(x = month, y = n, fill = year)) +
+    ggplot2::geom_col(),
+  side = ds |>
+    dplyr::count(year, ymonth) |>
+    ggplot2::ggplot(ggplot2::aes(x = ymonth, y = n, fill = year)) +
+    ggplot2::geom_col()
+) |>
+  patchwork::wrap_plots(ncol = 1, guides = "collect") +
   patchwork::plot_annotation(title = "EVT cases by year")
 ```
 
 ```{r}
-ds <- targets::tar_read("df_evt_basis")
+ds4dd <- targets::tar_read("df_evt_basis") |>
+  dplyr::transmute(
+    forloebid = as.character(forloebid),
+    name_first = firstname_patiente,
+    name_last = lastname_patiente,
+    cpr_first = as.character(format(dateofbirth_patiente, "%d%m%y")),
+    cpr = cpr_basisske,
+    index_dato = forloebdato_patiente,
+    index_tid = forloebtid_patiente
+  )
+
+ds4dd |> skimr::skim()
 ```
 
-Hmm. Vi mangler CPR på ptt. Måske de kan reddes, men nok ikke. Vi har navne, så de kan slås op.
+Dataset to base first part of DD
+
+```{r}
+dd <- ds4dd |>
+  REDCapCAST::ds2dd_detailed(form.name = "basis") |>
+  (\(.x){
+    .x$meta$field_annotation[.x$meta$field_name %in% c(
+      "name_first",
+      "name_last",
+      "cpr_first",
+      "index_dato",
+      "index_tid"
+    )] <- "@READONLY"
+    .x
+  })() |>
+  purrr::pluck("meta")
+```
+
+
+
+```{r}
+tbl <- project.aid::docx2list(path = "/Users/au301842/Library/CloudStorage/OneDrive-Personal/Research/Side projects/EVT projekt/EVT_Variabeloversigt.docx")
+
+dd_inst <- tbl[[1]] |> dplyr::mutate(variabel = REDCapCAST::clean_redcap_name(variabel))
+
+dd_raw <- dd_inst |>
+  doc2dd(instrument.name = "evt", 
+         col.description = "beskrivelse", 
+         col.condition = "betingelse", 
+         col.subheader = "overskrift", 
+         col.calculation = "beregning", 
+         col.choices = "valg")
+```
+
+
+
+```{r}
+dd_final <- dplyr::bind_rows(dd, dd_raw) |>
+  ## Adding header table to show necessary data for EPJ look-up
+  (\(.x){
+    .x$field_label[.x$form_name == "evt" & .x$field_name == "header_table"] <- .x[-1, ] |>
+      dplyr::filter(form_name == "basis") |>
+      dplyr::select(field_name, field_label) |>
+      (\(.y){
+        create_html_table(
+          stringr::str_to_sentence(gsub("_", ", ", .y$field_label)),
+          glue::glue("[{.y$field_name}]")
+        ) |>
+          html_tag_wrap(tag = "div", extra = 'class="rich-text-field-label"')
+      })()
+    .x$field_type[.x$form_name == "evt" & .x$field_name == "header_table"] <- "descriptive"
+
+    .x
+  })() |>
+  # Moving the cpr item to EVT, to allow embedding and filling in to values in case of missing.
+  (\(.x){
+    .x$form_name[.x$field_name == "cpr"] <- "evt"
+    
+    .x$field_annotation[.x$field_name == "cpr"] <- "@IF([cpr]!='' and [user-id]!='andlau',@READONLY,'')"
+    
+    .x
+  })() |>
+  # Setting field type as notes for note/comment fields
+  dplyr::mutate(field_type = dplyr::if_else(grepl("(_other)|(_notes)$", field_name), "notes", field_type)) |>
+  # Dropped auto-filling dates, as opting for branching, which is not compatible
+  # (\(.x){
+  #   .x$field_annotation[grepl("(_date)$", .x$field_name) & .x$form_name == "evt"] <- "@DEFAULT='[index_dato]'"
+  #   .x
+  # })() |>
+  # Changing cpr embedding in header table for option to fill in missing data
+  (\(.x){
+    .x$field_label[.x$field_name == "header_table"] <- gsub("\\[cpr\\]", "\\{cpr\\}", .x$field_label[.x$field_name == "header_table"])
+
+    .x
+  })()
+```
+
+Final merge and upload
+
+```{r}
+dd_final |>
+  dplyr::mutate(form_name = factor(form_name, levels = c("basis", "evt"))) |>
+  dplyr::arrange(form_name) |>
+  REDCapR::redcap_metadata_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+```
+
+
+
+## Generating sample data
+
+```{r}
+sample <- rep(c("1", "Jens", "jensen", "123456", "123456-1239", "2020-03-03", "10:10:10"), 5) |>
+  matrix(ncol = 7, byrow = TRUE) |>
+  dplyr::as_tibble(.name_repair = "unique") |>
+  setNames(dd$field_name)
+
+
+sample <- dplyr::tibble(
+  a = 1:6,
+  b = sample(c("Jens", "Lars", "Oda"), length(a), TRUE),
+  c = sample(c("Jensen", "Larsen"), length(a), TRUE),
+  d = format(sample(seq(as.Date("1920/01/01"), as.Date("2000/01/01"), by = "day"), length(a)), "%d%m%y"),
+  e = c(paste(d, "1239", sep = "-")[-length(a)], NA), "2020-03-03", "10:10:10"
+) |> setNames(dd$field_name)
+
+sample |> REDCapR::redcap_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+```
