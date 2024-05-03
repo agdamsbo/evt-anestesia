@@ -80,7 +80,7 @@ dd <- ds4dd |>
 
 
 ```{r}
-tbl <- project.aid::docx2list(path = "/Users/au301842/Library/CloudStorage/OneDrive-Personal/Research/Side projects/EVT projekt/EVT_Variabeloversigt.docx")
+tbl <- project.aid::docx2list(path = here::here("doc/EVT_Variabeloversigt.docx"))
 
 dd_inst <- tbl[[1]] |> dplyr::mutate(variabel = REDCapCAST::clean_redcap_name(variabel))
 
