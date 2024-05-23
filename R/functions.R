@@ -195,7 +195,7 @@ doc2dd <- function(data,
                    col.variables = 1,
                    list.datetime.format = list(
                      date_dmy = "_dat[eo]$",
-                     time_hh_mm_ss = "_ti[md]e?$"
+                     time = "_ti[md]e?$"
                    ),
                    col.description = NULL,
                    col.condition = NULL,
