@@ -27,7 +27,8 @@ Imports:
     skimr,
     officer,
     snakecase,
-    stringr
+    stringr,
+    rstatix
 Description: What the package does (one paragraph).
 License: CC BY 4.0
 Encoding: UTF-8

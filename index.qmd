@@ -74,7 +74,9 @@ dd <- ds4dd |>
     )] <- "@READONLY"
     .x
   })() |>
-  purrr::pluck("meta")
+  purrr::pluck("meta") |> 
+  dplyr::mutate(form_name="basis",
+                text_validation_type_or_show_slider_number=gsub("time_hh_mm_ss","time",text_validation_type_or_show_slider_number))
 ```
 
 
@@ -142,7 +144,9 @@ Final merge and upload
 dd_final |>
   dplyr::mutate(form_name = factor(form_name, levels = c("basis", "evt"))) |>
   dplyr::arrange(form_name) |>
-  REDCapR::redcap_metadata_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+  # REDCapR::redcap_metadata_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+  openxlsx2::write_xlsx("evt_datadictionary.xlsx",na.strings="")
+# Project is in production (!)
 ```
 
 
@@ -150,19 +154,31 @@ dd_final |>
 ## Generating sample data
 
 ```{r}
-sample <- rep(c("1", "Jens", "jensen", "123456", "123456-1239", "2020-03-03", "10:10:10"), 5) |>
-  matrix(ncol = 7, byrow = TRUE) |>
-  dplyr::as_tibble(.name_repair = "unique") |>
-  setNames(dd$field_name)
-
-
-sample <- dplyr::tibble(
-  a = 1:6,
-  b = sample(c("Jens", "Lars", "Oda"), length(a), TRUE),
-  c = sample(c("Jensen", "Larsen"), length(a), TRUE),
-  d = format(sample(seq(as.Date("1920/01/01"), as.Date("2000/01/01"), by = "day"), length(a)), "%d%m%y"),
-  e = c(paste(d, "1239", sep = "-")[-length(a)], NA), "2020-03-03", "10:10:10"
-) |> setNames(dd$field_name)
-
-sample |> REDCapR::redcap_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+# sample <- rep(c("1", "Jens", "jensen", "123456", "123456-1239", "2020-03-03", "10:10:10"), 5) |>
+#   matrix(ncol = 7, byrow = TRUE) |>
+#   dplyr::as_tibble(.name_repair = "unique") |>
+#   setNames(dd$field_name)
+# 
+# 
+# sample <- dplyr::tibble(
+#   a = 1:6,
+#   b = sample(c("Jens", "Lars", "Oda"), length(a), TRUE),
+#   c = sample(c("Jensen", "Larsen"), length(a), TRUE),
+#   d = format(sample(seq(as.Date("1920/01/01"), as.Date("2000/01/01"), by = "day"), length(a)), "%d%m%y"),
+#   e = c(paste(d, "1239", sep = "-")[-length(a)], NA), "2020-03-03", "10:10:10"
+# ) |> setNames(dd$field_name)
+# 
+# sample |> REDCapR::redcap_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
 ```
+
+
+## Uploading basis data
+
+```{r}
+ds4dd |> 
+  dplyr::mutate(index_tid=format(index_tid,"%H:%M"),
+                basis_complete=2) |> 
+  # dplyr::slice(1:50) |>
+  REDCapR::redcap_write(redcap_uri = "https://redcap.rm.dk/api/", token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+```
+

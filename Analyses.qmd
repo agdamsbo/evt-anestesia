@@ -1,0 +1,338 @@
+---
+title: "Interim analyses"
+date: last-modified
+format: docx
+editor: source
+execute: 
+  echo: false
+---
+
+```{r setup}
+source(here::here("R/functions.R"))
+```
+
+
+```{r}
+# dd_dap <- REDCapR::redcap_metadata_read(
+#   token = keyring::key_get("DAP_REDCAP_API"),
+#   redcap_uri = "https://redcap.au.dk/api/"
+# ) |>
+#   purrr::pluck("data")
+# dd_dap |> View()
+# dput(dd_dap[["field_name"]][grep(pattern = "ank",dd_dap[["field_name"]])])
+```
+
+```{r}
+# REDCapR::redcap_metadata_read(
+#   redcap_uri = "https://redcap.rm.dk/api/",
+#   token = keyring::key_get("EVT_ANEST_REDCAP_API")
+# ) |>
+#   purrr::pluck("data") |>
+#   View()
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+ds_evt <- REDCapR::redcap_read(
+  redcap_uri = "https://redcap.rm.dk/api/",
+  token = keyring::key_get("EVT_ANEST_REDCAP_API"),
+  fields = c(
+    "forloebid",
+    "extubation_novent",
+    "pacu_delay",
+    "pacu_delay_reason",
+    "icu_direct",
+    "reintubation_reason",
+    "pacu_arrival_date",
+    "pacu_arrival_time",
+    "pacu_saox_first",
+    "pacu_bp_sys_first",
+    "pacu_bp_dia_first",
+    "pacu_mabp_first",
+    "pacu_saox_last",
+    "pacu_bp_sys_last",
+    "pacu_bp_dia_last",
+    "pacu_mabp_last",
+    "pacu_ox_req",
+    "pacu_events_type",
+    "pacu_extend_type",
+    "pacu_dicharge_date",
+    "pacu_dicharge_time",
+    "icu_arrival_date",
+    "icu_arrival_time",
+    "icu_dicharge_date",
+    "icu_dicharge_time",
+    "ward_events_type",
+    "ward_events_other",
+    "pneumonia"
+  ),
+  raw_or_label = "label"
+) |>
+  purrr::pluck("data")
+```
+
+
+```{r}
+#| message: false
+#| warning: false
+ds_clin <- ds_evt |> evt_clinical_data()
+
+# ds_clin |> dplyr::select(tidyselect::contains("doed")) |> skimr::skim()
+
+ds_format <- ds_clin |>
+  format_all() |>
+  dplyr::rename(
+    nihss = nihss_basisske
+  ) |>
+  merge_dato_tid()
+
+# ds_format$sex_patiente |> factor() |> summary()
+
+# ds_format |> skimr::skim()
+```
+
+## Baseline characteristics
+
+Below are the initial baseline characteristics stratified by smooth PACU transfer or not.
+
+```{r}
+#| message: false
+#| warning: false
+ds_all <- dplyr::left_join(
+  ds_evt |>
+    merge_date_time() |>
+    format_all(fmt.lst = evt_redcap_format_dic()),
+  ds_format
+) |>
+  dplyr::mutate(
+    art2rep_timediff = difftime(tidreperf_datetime, artpunkt_datetime, units = "mins"),
+    ank2rep_timediff = difftime(tidreperf_datetime, modafdankomst_datetime, units = "mins"),
+    onset2rep_timediff = difftime(tidreperf_datetime, symptdebexact_datetime, units = "mins"),
+    art2procend_timediff = difftime(procafsl_datetime, artpunkt_datetime, units = "mins"),
+    angio2art_timediff = difftime(artpunkt_datetime, ankneurorad_datetime, units = "mins"),
+    mr2angio_timediff = difftime(ankneurorad_datetime, ankomstevtctmr_datetime, units = "mins"),
+    admission_timediff = difftime(udskr_datetime, modafdankomst_datetime, units = "days"),
+    mors_hospital = ifelse(mors_date > as.Date(udskr_datetime), "After discharge", "During admission")
+  ) |>
+  (\(.x){
+    any_compl <- apply(dplyr::select(.x, dplyr::starts_with("compl_"), -dplyr::ends_with("text")), 1, any)
+    dplyr::bind_cols(.x,
+      compl_any = ifelse(is.na(any_compl), FALSE, any_compl)
+    )
+  })() |>
+  dplyr::mutate(location = dplyr::case_when(
+    trombelokva_trombekt | trombelokba_trombekt | trombelokpca_trombekt ~ "posterior",
+    trombelokingen_trombekt ~ "none",
+    trombelokcca_trombekt | trombelokica_trombekt | trombelokica_t_trombekt | trombelokmca1_trombekt | trombelokmca2_trombekt | trombelokaca_trombekt | trombelokcervical_trombekt ~ "anterior",
+    .default = NA
+  ))
+```
+
+## Extremes and outliers
+
+Values above Q3 + 3xIQR or below Q1 - 3xIQR are considered as extreme points (or extreme outliers).
+
+I suggest excluding extreme values, not just outliers.
+
+They could also be kept as long as we are mainly concerned with medians.
+
+Flagging outliers from the EVT database, that needs inspection
+
+```{r}
+names(ds_all)[endsWith(names(ds_all),"timediff")][1:2] |> 
+  lapply(\(.x){
+    rstatix::identify_outliers(
+      ds_all[c("forloebid", .x)], !!dplyr::sym(.x)
+    ) |>
+      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
+        forloebid = as.character(forloebid)
+      ) |> 
+      dplyr::filter(is.extreme)
+  })|>
+  lapply(\(.x){
+    .x |> 
+  gt::gt() |>
+  gt::fmt_number(decimals = 1)
+  }) |> setNames(c("Time at PACU","Time at ICU")) |> 
+  purrr::imap(\(.x,.i){
+    .x |> gt::gtsave(paste0("extremes_",gsub(" ","_",.i),".docx"))
+  })
+```
+
+Handling outliers from the Stroke database
+
+```{r}
+vars <- c(
+  "art2rep_timediff",
+  "ank2rep_timediff",
+  "onset2rep_timediff",
+  "art2procend_timediff",
+  "angio2art_timediff",
+  "mr2angio_timediff",
+  "admission_timediff"
+)
+
+outliers_l <- seq_along(vars) |>
+  lapply(\(.x){
+    rstatix::identify_outliers(
+      ds_all[c("forloebid", vars[.x])], !!dplyr::sym(vars[.x])
+    ) |>
+      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
+        forloebid = as.character(forloebid)
+      )
+  }) |>
+  setNames(vars)
+
+outliers_l |>
+  lapply(\(.x){
+    .x |> 
+  gt::gt() |>
+  gt::fmt_number(decimals = 1)
+  })
+
+ds_all$admission_timediff |> rstatix::is_extreme()
+
+ds_all[vars] |> skimr::skim()
+
+ds_clean <- ds_all |>
+  purrr::imap(\(.x, .i){
+    if (.i %in% vars) {
+      filter <- rstatix::is_outlier(.x, coef = 10) & !is.na(.x)
+      old <- .x
+      .x[filter] <- NA
+      out <- data.frame(.x,old, filter) |> setNames(c(.i, paste0(.i, "_old"), paste0(.i, "_filter")))
+    } else {
+      out <- .x
+    }
+    out
+  }) |>
+  dplyr::bind_cols()
+
+ds_clean$extreme_filtered <- apply(ds_clean[grep(pattern = "_filter$",names(ds_clean))],1,any)
+
+ds_clean$extreme_filtered |> summary()
+
+vars |> 
+  lapply(\(.x){
+    ds <- ds_clean[startsWith(names(ds_clean),.x)] 
+    
+    ds[2:3] |>  dplyr::filter(!!dplyr::sym(names(ds)[3]))
+  })
+```
+
+
+
+
+```{r}
+#| message: false
+#| warning: false
+tbl1 <- ds_clean |>
+  dplyr::filter(!is.na(extubation_novent)) |>
+  # dplyr::mutate(pacu_saox_last=as.numeric(pacu_saox_last)) |>
+  dplyr::select( # forloebid,
+    extubation_novent,
+    age,
+    female,
+    hypertension,
+    diabetes,
+    tci,
+    ais,
+    afib,
+    ami,
+    pad,
+    smoking,
+    alc_above,
+    living_alone,
+    nihss,
+    mrs_pre,
+    tidyselect::ends_with("timediff"),
+    location,
+    compl_any,
+    tici,
+    pacu_delay,
+    # pacu_delay_reason,
+    icu_direct,
+    pacu_saox_first,
+    pacu_mabp_first,
+    pacu_saox_last,
+    pacu_mabp_last,
+    pacu_ox_req,
+    pacu_events_type,
+    pacu_extend_type,
+    nihss_24h,
+    pneumonia,
+    ward_events_type,
+    # ward_events_other,
+    mrs_3mdr,
+    mors_hospital
+  ) |>
+  labelling_data() |>
+  gtsummary::tbl_summary(
+    by = extubation_novent,
+    type = list(c(
+      pacu_saox_first,
+      pacu_mabp_first,
+      pacu_saox_last,
+      pacu_mabp_last,
+      pacu_ox_req
+    ) ~ "continuous2"),
+    digits = list(c(
+      pacu_saox_first,
+      pacu_mabp_first,
+      pacu_saox_last,
+      pacu_mabp_last,
+      pacu_ox_req
+    ) ~ 0),
+    statistic = list(
+      gtsummary::all_continuous() ~ "{median} ({p25}, {p75})",
+      gtsummary::all_categorical() ~ "{n} ({p}%)"
+    )
+  ) |>
+  gtsummary::add_p() |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_overall()
+# tbl1
+
+tbl1 |>
+  gtsummary::as_gt() |>
+  gt::text_transform(
+    locations = gt::cells_row_groups(),
+    fn = function(x) {
+      lapply(x, function(x) {
+        gt::md(paste0("**", x, "**"))
+      })
+    }
+  )
+
+# tbl1 |>
+#   gtsummary::as_gt() |>
+#   gt::gtsave(glue::glue("tbl1_{Sys.Date()}.docx"))
+```
+
+## mRS stratified by groups
+
+Grotta bars of mRS shift post stroke
+
+```{r}
+ds_all |>
+  dplyr::select(
+    mrs_3mdr,
+    extubation_novent
+  ) |>
+  table() |>
+  rankinPlot::grottaBar(
+    scoreName = "mrs_3mdr",
+    groupName = "extubation_novent",
+    textColor = c("black", "white"),
+    # strataName = strata,
+    # textCut = 6,
+    # textSize = 13,
+    printNumbers = "count" # ,
+    # lineColor = l.color,
+    # lineSize = l.size,
+    # drawLines = draw.lines,
+    # returnData = TRUE
+  )
+```

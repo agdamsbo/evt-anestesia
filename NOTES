@@ -1,0 +1,10 @@
+
+21.10.24
+
+## Todo
+
+Move to targets (ensure nothing is done to the database creation; disable)
+Include more clinical measures (age, sex). - DONE
+Create datatime objects and timedifference objects to calculate time at PACU/ICU.
+Simple OLR analysis.
+Generate basic report

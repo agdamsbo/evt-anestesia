@@ -7,3 +7,7 @@
 
 
 _targets/
+*.docx
+*.xlsx
+*.doc
+*.xls
