@@ -1,0 +1,200 @@
+---
+title: "assignment"
+format: docx
+---
+
+```{r setup}
+source(here::here("R/functions.R"))
+```
+
+```{r}
+ds_raw <- REDCapCAST::easy_redcap(
+  project.name = "EVT_ANEST",
+  uri = "https://redcap.rm.dk/api/",
+  raw_or_label = "both",
+  fields = c(
+    "forloebid",
+    "extubation_novent",
+    "pacu_delay",
+    "pacu_delay_reason",
+    "icu_direct",
+    "reintubation_reason",
+    "pacu_events_type",
+    "pacu_extend_type",
+    "ward_events_type",
+    "ward_events_other",
+    "pneumonia",
+    "pacu_timediff",
+    "icu_timediff",
+    "age",
+    "female",
+    "hypertension",
+    "diabetes",
+    "tci",
+    "ais",
+    "afib",
+    "ami",
+    "pad",
+    "smoking",
+    "alc_above",
+    "living_alone",
+    "nihss",
+    "mrs_pre",
+    "location",
+    "compl_any",
+    "tici",
+    "mrs_3mdr",
+    "mors_hospital",
+    "mors_date",
+    "modafdankomst_datetime",
+    "admission_timediff"
+  )
+)
+
+
+ds <- ds_raw |>
+  remove_na_cols() |>
+  REDCapCAST::as_factor() |>
+  dplyr::select(-forloebid) |>
+  truefalse2logical()
+
+ds
+```
+
+# Hypoteser: 
+
+   * Primær hypotese: Patienter der har et glat forløb sv.t. hurtig ekstubering, 2 timers ophold på opvågningsafsnit og efterfølgende kortvarig indlæggelse på stroke sengeafsnit, har det bedste funktionelle outcome (målt med mRS) sammenlignet med patienter som har et kompliceret forløb.
+
+   * Sekundær hypotese: Patienter med posterior okklusion har hyppigere et kompliceret forløb og et dårligere funktionelt outcome (målt med mRS) sammenlignet med patienter, der har okklusion i det anteriore kredsløb.
+
+# Results
+
+```{r}
+# ds |> gtsummary::tbl_summary(missing_text = "Missing")
+
+ds |> dplyr::select(-ward_events_other) |> 
+  dplyr::mutate(
+    extubation_novent = forcats::fct_na_value_to_level(
+      extubation_novent,
+      level = "Missing table"
+    )
+  ) |> 
+  gtsummary::tbl_summary(
+    by = extubation_novent,
+    missing_text = "Missing"
+  ) |>
+  gtsummary::add_overall()
+
+ds |>
+  dplyr::mutate(
+    location = forcats::fct_na_value_to_level(
+      location,
+      level = "Missing data"
+      )) |>
+  gtsummary::tbl_summary(
+    by = location, 
+    missing_text = "Missing"
+    ) |>
+  gtsummary::add_overall()
+```
+
+
+```{r}
+ds |>
+  dplyr::select(
+    mrs_3mdr,
+    extubation_novent
+  ) |>
+  table() |>
+  rankinPlot::grottaBar(
+    scoreName = "mrs_3mdr",
+    groupName = "extubation_novent",
+    textColor = c("black", "white"),
+    # strataName = strata,
+    # textCut = 6,
+    # textSize = 13,
+    printNumbers = "count" # ,
+    # lineColor = l.color,
+    # lineSize = l.size,
+    # drawLines = draw.lines,
+    # returnData = TRUE
+  )
+```
+
+```{r}
+ds |>
+  dplyr::select(
+    mrs_3mdr,
+    location#,
+    # extubation_novent
+  ) |>
+  table() |>
+  rankinPlot::grottaBar(
+    scoreName = "mrs_3mdr",
+    groupName = "location",
+    textColor = c("black", "white"),
+    # strataName = "extubation_novent",
+    # textCut = 6,
+    # textSize = 13,
+    printNumbers = "percentage" # ,
+    # lineColor = l.color,
+    # lineSize = l.size,
+    # drawLines = draw.lines,
+    # returnData = TRUE
+  )
+```
+
+```{r}
+ds_surv <- ds |> 
+  dplyr::mutate(
+    status = ifelse(is.na(mors_date),0,1),
+    ## This really should use the date of follow-up!
+    time = ifelse(status==1,abs(difftime(mors_date,modafdankomst_datetime,units = "days")),150)
+)
+
+# str(ds_surv)
+# 
+# survival::survfit(survival::Surv(time, status)~age+female,ds_surv)
+```
+
+## Different way sof analysing the results
+
+Consider the order of effect.
+
+
+
+```{r}
+# surv_mod <- ggsurvfit::survfit2(survival::Surv(time, status) ~ female, data = ds_surv)
+library(survival)
+
+ds_cox <- dplyr::filter(ds_surv,location!="none") |> REDCapCAST::fct_drop()
+
+cox_mod <- with(ds_cox,
+                 survival::coxph(survival::Surv(time, status) ~ age+tici+location+female+pneumonia))
+
+performance::check_model(cox_mod)
+
+tbl <- gtsummary::tbl_regression(cox_mod,exponentiate=TRUE)
+
+tbl |> plot()
+
+ds |> dplyr::select(extubation_novent,location) |> gtsummary::tbl_summary(by=extubation_novent) |> gtsummary::add_p()
+
+
+gtsummary::tbl_uvregression(ds_cox,method=coxph,y=Surv(time, status))
+
+surv_mod <- with(dplyr::filter(ds_surv,location!="none") |> REDCapCAST::fct_drop(),
+                 survival::coxph(survival::Surv(time, status) ~ survival::strata(location)+age+female+pneumonia))
+
+surv_mod|> 
+  ggsurvfit::survfit2()|>
+  ggsurvfit::ggsurvfit() +
+  ggsurvfit::add_confidence_interval() +
+  ggsurvfit::scale_ggsurvfit()
+
+```
+
+```{r}
+freesearcheR::shiny_freesearcheR()
+```
+

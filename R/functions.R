@@ -441,11 +441,20 @@ evt_clinical_data <- function(data) {
       "status_basisske",
       "datodoed_tremdrop",
       "doedaarsag_tremdrop",
-      "lysedoed_tremdrop"
+      "lysedoed_tremdrop",
+      "nyapo_tremdrop",
+      "datonyapodato_tremdrop",
+      "datonyapotid_tremdrop",
+      "oprettet_tremdrop",
+      "sidstopdateret_tremdrop"
     )
   )$data |>
     dplyr::select(-redcap_repeat_instrument, -redcap_repeat_instance)
 }
+
+# dd <- REDCapR::redcap_metadata_read(
+#   token = keyring::key_get("DAP_REDCAP_API"),
+#   redcap_uri = "https://redcap.au.dk/api/")
 
 
 #' Supposes a systematic naming of paired data and time variables
@@ -504,14 +513,11 @@ evt_redcap_format_dic <- function() {
       )
     },
     extubation_novent = function(data) {
-      factor(
         dplyr::case_match(data,
-          "Yes" ~ "Smooth",
-          "No" ~ "Event",
+          "Yes" ~ TRUE,
+          "No" ~ FALSE,
           .default = NA
-        ),
-        levels = c("Smooth", "Event")
-      )
+        )
     },
     pacu_saox_first = function(data) {
       as.numeric(data)
@@ -529,6 +535,50 @@ evt_redcap_format_dic <- function() {
       as.numeric(data)
     }
   )
+}
+
+#' Interpret specific binary values as logicals
+#'
+#' @param data vector or data.frame (first column is used)
+#' @param values list of values to interpret as logicals. First value is interpreted as TRUE
+#'
+#' @returns vector
+#' @export
+#'
+#' @examples
+#' c(sample(c("TRUE","FALSE"),20,TRUE),NA) |> as_logical() |> class()
+#' ds <- dplyr::tibble(B=factor(sample(c(1,2),20,TRUE)),A=factor(sample(c("TRUE","FALSE"),20,TRUE)),C=sample(c(3,4),20,TRUE),D=factor(sample(c("In","Out"),20,TRUE))) 
+#' ds |> lapply(as_logical) |> dplyr::bind_cols() |> sapply(class)
+#' ds$A |> class()
+as_logical <- function(data,values=list(c("TRUE","FALSE"),c("Yes","No"),c(1,0),c(1,2))){
+  label <- REDCapCAST::get_attr(data,"label")
+  if (is.data.frame(data)){
+    data <- data[[1]]
+  }
+  # browser()
+  out <- c()
+  if (any(c("character","factor","numeric") %in% class(data)) && length(unique(data[!is.na(data)]))==2){
+    if (is.factor(data)){
+      match_index <- which(sapply(values,\(.x){all(.x %in% levels(data))}))
+    } else {
+    match_index <- which(sapply(values,\(.x){all(.x %in% data)}))
+    }
+    if (length(match_index)==1){
+    out <- data==values[[match_index]][1]
+    } else if (length(match_index)>1){
+      # If matching several, the first match is used.
+      out <- data==values[[match_index[1]]][1]
+    }
+  } 
+  
+  if (length(out)==0) {
+    out <- data
+  }
+  
+  if (!is.na(label)){
+  out <- REDCapCAST::set_attr(out,label = label, attr = "label")
+  }
+  out
 }
 
 
@@ -652,8 +702,8 @@ dap_redcap_format_dic <- function() {
     sex_patiente = function(data) {
       dplyr::case_match(
         data,
-        1 ~ TRUE,
-        0 ~ FALSE,
+        1 ~ "female",
+        0 ~ "male",
         .default = NA
       )
     },
@@ -724,15 +774,15 @@ dap_redcap_format_dic <- function() {
     doedaarsag_tremdrop = function(data) {
       dplyr::case_match(
         data,
-        1~"Hjerneinfarkt",
-        2~"Hjerneblødning",
-        3~"Hjerneinfarkt og blødning ingen specifikation",
-        4~"Myokardie infarkt",
-        5~"Lungeemboli",
-        6~"Lungebetændelse",
-        7~"Anden vaskulær årsag",
-        8~"Andet",
-        9~"Ukendt",
+        1 ~ "Hjerneinfarkt",
+        2 ~ "Hjerneblødning",
+        3 ~ "Hjerneinfarkt og blødning ingen specifikation",
+        4 ~ "Myokardie infarkt",
+        5 ~ "Lungeemboli",
+        6 ~ "Lungebetændelse",
+        7 ~ "Anden vaskulær årsag",
+        8 ~ "Andet",
+        9 ~ "Ukendt",
         .default = NA
       )
     },
@@ -976,6 +1026,8 @@ merge_dato_tid <- function(data, pattern = "(dato|tid)_", keep = FALSE) {
     df <- dplyr::select(data, tidyselect::starts_with(.x)) |>
       dplyr::select(tidyselect::contains("dato_"), tidyselect::contains("tid_"))
 
+    df <- df |> remove_na_cols()
+    
     if (ncol(df) == 1) {
       out <- tibble::tibble(format(df[[1]], "%Y-%m-%d %H:%M:%S"))
     } else {
@@ -1015,4 +1067,128 @@ fix_labels <- function(data, variable.labels = var_labels()) {
   class(data) <- cls
 
   data
+}
+
+truefalse2logical <- function(data) {
+  data |>
+    lapply(\(.x){
+      label <- REDCapCAST::get_attr(.x, "label")
+
+      if (is.factor(.x)) {
+        if (all(c("TRUE", "FALSE") %in% levels(.x))) {
+          out <- .x == "TRUE"
+        } else {
+          out <- .x
+        }
+      } else {
+        out <- .x
+      }
+      REDCapCAST::set_attr(out, label = label, attr = "label")
+    }) |>
+    dplyr::bind_cols()
+}
+
+remove_na_cols <- function(data) {
+  data |>
+    purrr::map(\(.x){
+      if (!REDCapCAST::all_na(.x)) {
+        .x
+      }
+    }) |>
+    dplyr::bind_cols()
+}
+
+missing_fraction <- function(data){
+  NROW(data[is.na(data)])/NROW(data)
+}
+
+missing_group_plot <- function(data,group){
+  data |> 
+    dplyr::group_by(!!dplyr::sym(group)) |> 
+    dplyr::summarise(dplyr::across(dplyr::everything(),missing_fraction)) |> 
+    tidyr::pivot_longer(-!!dplyr::sym(group)) |> 
+    ggplot2::ggplot(ggplot2::aes(x=!!dplyr::sym(group),y=value,fill=name)) + 
+    ggplot2::geom_bar(stat="identity",position = 'dodge')
+}
+
+
+flowchart <- function(data, export.path = NULL) {
+  
+  ds <- data |> 
+    dplyr::mutate(
+      # Missing tables
+      missing_data = factor(dplyr::if_else(is.na(extubation_novent),"Missing data",NA,missing = "Missing data")),
+      # Direct PACU
+      direct_pacu=!extubation_novent,
+      # Corrected PACU extension definition
+      # Redefine event/extension?
+      pacu_extend_exp = is.na(pacu_extend_type) | is.na(pacu_events_type),
+      # Redefine after review
+      ward_event_icu_type = dplyr::if_else(ward_event_icu,ward_events_type,NA),
+      
+      pneumonia_ward = dplyr::if_else(pneumonia,"Treated",NA)
+    )
+  
+  out <- ds |> consort::consort_plot(
+    orders = c(
+      forloebid = "All subjects",
+      missing_data = "Missing papers",
+      forloebid = "Available subjects",
+      icu_direct = "Direct ICU transfer",
+      direct_pacu = "Directly to PACU",
+      pacu_events_type = "ICU transfer from PACU",
+      pacu_events = "No PACU to ICU transfer",
+      pacu_extend_type = "PACU extension",
+      pacu_extend_exp = "No PACU extension",
+      ward_event_icu_type = "Event at stroke ward",
+      forloebid = "No ICU transfer within 24h from ward"
+      # direct_ward = "No ICU transfer within 24h from ward"
+    ),
+    side_box = c(
+      "missing_data",
+      "icu_direct",
+      "pacu_events_type",
+      "pacu_extend_type",
+      "ward_event_icu_type"
+      ),
+    labels = c(
+      "1" = "All treated",
+      # "2" = "Complete clinical follow-up",
+      "3" = "Direct PACU",
+      "6" = "Smooth flow"
+    )
+  )
+  
+  if (!is.null(export.path)) {
+    if (tools::file_ext(export.path)=="png"){
+      out |> export_grViz_png(path = export.path)
+    } else {
+      out |> export_consort_dot(path = export.path)
+    }
+  } else {
+    plot(out)
+  }
+}
+
+
+export_grViz_png <- function(data, path) {
+  plot(data, grViz = TRUE) |>
+    DiagrammeRsvg::export_svg() |>
+    charToRaw() |>
+    rsvg::rsvg_png(file = path)
+}
+
+#' Export dot file for most flexible plotting (over png)
+#'
+#' @param data
+#' @param path
+#'
+#' @return
+#' @export
+#'
+#' @examples
+export_consort_dot <- function(data, path) {
+  ls <- data |>
+    consort:::plot.consort(grViz = TRUE)
+  writeLines(ls$x$diagram, con = here::here(path))
 }

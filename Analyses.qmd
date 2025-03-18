@@ -9,88 +9,7 @@ execute:
 
 ```{r setup}
 source(here::here("R/functions.R"))
-```
-
-
-```{r}
-# dd_dap <- REDCapR::redcap_metadata_read(
-#   token = keyring::key_get("DAP_REDCAP_API"),
-#   redcap_uri = "https://redcap.au.dk/api/"
-# ) |>
-#   purrr::pluck("data")
-# dd_dap |> View()
-# dput(dd_dap[["field_name"]][grep(pattern = "ank",dd_dap[["field_name"]])])
-```
-
-```{r}
-# REDCapR::redcap_metadata_read(
-#   redcap_uri = "https://redcap.rm.dk/api/",
-#   token = keyring::key_get("EVT_ANEST_REDCAP_API")
-# ) |>
-#   purrr::pluck("data") |>
-#   View()
-```
-
-
-```{r}
-#| message: false
-#| warning: false
-ds_evt <- REDCapR::redcap_read(
-  redcap_uri = "https://redcap.rm.dk/api/",
-  token = keyring::key_get("EVT_ANEST_REDCAP_API"),
-  fields = c(
-    "forloebid",
-    "extubation_novent",
-    "pacu_delay",
-    "pacu_delay_reason",
-    "icu_direct",
-    "reintubation_reason",
-    "pacu_arrival_date",
-    "pacu_arrival_time",
-    "pacu_saox_first",
-    "pacu_bp_sys_first",
-    "pacu_bp_dia_first",
-    "pacu_mabp_first",
-    "pacu_saox_last",
-    "pacu_bp_sys_last",
-    "pacu_bp_dia_last",
-    "pacu_mabp_last",
-    "pacu_ox_req",
-    "pacu_events_type",
-    "pacu_extend_type",
-    "pacu_dicharge_date",
-    "pacu_dicharge_time",
-    "icu_arrival_date",
-    "icu_arrival_time",
-    "icu_dicharge_date",
-    "icu_dicharge_time",
-    "ward_events_type",
-    "ward_events_other",
-    "pneumonia"
-  ),
-  raw_or_label = "label"
-) |>
-  purrr::pluck("data")
-```
-
-
-```{r}
-#| message: false
-#| warning: false
-ds_clin <- ds_evt |> evt_clinical_data()
-
-# ds_clin |> dplyr::select(tidyselect::contains("doed")) |> skimr::skim()
-
-ds_format <- ds_clin |>
-  format_all() |>
-  dplyr::rename(
-    nihss = nihss_basisske
-  ) |>
-  merge_dato_tid()
-
-# ds_format$sex_patiente |> factor() |> summary()
-
-# ds_format |> skimr::skim()
+source(here::here("R/data_ready.R"))
 ```
 
 ## Baseline characteristics
@@ -98,141 +17,20 @@ ds_format <- ds_clin |>
 Below are the initial baseline characteristics stratified by smooth PACU transfer or not.
 
 ```{r}
-#| message: false
-#| warning: false
-ds_all <- dplyr::left_join(
-  ds_evt |>
-    merge_date_time() |>
-    format_all(fmt.lst = evt_redcap_format_dic()),
-  ds_format
-) |>
-  dplyr::mutate(
-    art2rep_timediff = difftime(tidreperf_datetime, artpunkt_datetime, units = "mins"),
-    ank2rep_timediff = difftime(tidreperf_datetime, modafdankomst_datetime, units = "mins"),
-    onset2rep_timediff = difftime(tidreperf_datetime, symptdebexact_datetime, units = "mins"),
-    art2procend_timediff = difftime(procafsl_datetime, artpunkt_datetime, units = "mins"),
-    angio2art_timediff = difftime(artpunkt_datetime, ankneurorad_datetime, units = "mins"),
-    mr2angio_timediff = difftime(ankneurorad_datetime, ankomstevtctmr_datetime, units = "mins"),
-    admission_timediff = difftime(udskr_datetime, modafdankomst_datetime, units = "days"),
-    mors_hospital = ifelse(mors_date > as.Date(udskr_datetime), "After discharge", "During admission")
-  ) |>
-  (\(.x){
-    any_compl <- apply(dplyr::select(.x, dplyr::starts_with("compl_"), -dplyr::ends_with("text")), 1, any)
-    dplyr::bind_cols(.x,
-      compl_any = ifelse(is.na(any_compl), FALSE, any_compl)
-    )
-  })() |>
-  dplyr::mutate(location = dplyr::case_when(
-    trombelokva_trombekt | trombelokba_trombekt | trombelokpca_trombekt ~ "posterior",
-    trombelokingen_trombekt ~ "none",
-    trombelokcca_trombekt | trombelokica_trombekt | trombelokica_t_trombekt | trombelokmca1_trombekt | trombelokmca2_trombekt | trombelokaca_trombekt | trombelokcervical_trombekt ~ "anterior",
-    .default = NA
-  ))
+## Get updated data points, merge with original
 ```
-
-## Extremes and outliers
-
-Values above Q3 + 3xIQR or below Q1 - 3xIQR are considered as extreme points (or extreme outliers).
-
-I suggest excluding extreme values, not just outliers.
-
-They could also be kept as long as we are mainly concerned with medians.
-
-Flagging outliers from the EVT database, that needs inspection
-
-```{r}
-names(ds_all)[endsWith(names(ds_all),"timediff")][1:2] |> 
-  lapply(\(.x){
-    rstatix::identify_outliers(
-      ds_all[c("forloebid", .x)], !!dplyr::sym(.x)
-    ) |>
-      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
-        forloebid = as.character(forloebid)
-      ) |> 
-      dplyr::filter(is.extreme)
-  })|>
-  lapply(\(.x){
-    .x |> 
-  gt::gt() |>
-  gt::fmt_number(decimals = 1)
-  }) |> setNames(c("Time at PACU","Time at ICU")) |> 
-  purrr::imap(\(.x,.i){
-    .x |> gt::gtsave(paste0("extremes_",gsub(" ","_",.i),".docx"))
-  })
-```
-
-Handling outliers from the Stroke database
-
-```{r}
-vars <- c(
-  "art2rep_timediff",
-  "ank2rep_timediff",
-  "onset2rep_timediff",
-  "art2procend_timediff",
-  "angio2art_timediff",
-  "mr2angio_timediff",
-  "admission_timediff"
-)
-
-outliers_l <- seq_along(vars) |>
-  lapply(\(.x){
-    rstatix::identify_outliers(
-      ds_all[c("forloebid", vars[.x])], !!dplyr::sym(vars[.x])
-    ) |>
-      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
-        forloebid = as.character(forloebid)
-      )
-  }) |>
-  setNames(vars)
-
-outliers_l |>
-  lapply(\(.x){
-    .x |> 
-  gt::gt() |>
-  gt::fmt_number(decimals = 1)
-  })
-
-ds_all$admission_timediff |> rstatix::is_extreme()
-
-ds_all[vars] |> skimr::skim()
-
-ds_clean <- ds_all |>
-  purrr::imap(\(.x, .i){
-    if (.i %in% vars) {
-      filter <- rstatix::is_outlier(.x, coef = 10) & !is.na(.x)
-      old <- .x
-      .x[filter] <- NA
-      out <- data.frame(.x,old, filter) |> setNames(c(.i, paste0(.i, "_old"), paste0(.i, "_filter")))
-    } else {
-      out <- .x
-    }
-    out
-  }) |>
-  dplyr::bind_cols()
-
-ds_clean$extreme_filtered <- apply(ds_clean[grep(pattern = "_filter$",names(ds_clean))],1,any)
-
-ds_clean$extreme_filtered |> summary()
-
-vars |> 
-  lapply(\(.x){
-    ds <- ds_clean[startsWith(names(ds_clean),.x)] 
-    
-    ds[2:3] |>  dplyr::filter(!!dplyr::sym(names(ds)[3]))
-  })
-```
-
 
 
 
 ```{r}
 #| message: false
 #| warning: false
-tbl1 <- ds_clean |>
+tbl1 <- ds_all |>
   dplyr::filter(!is.na(extubation_novent)) |>
   # dplyr::mutate(pacu_saox_last=as.numeric(pacu_saox_last)) |>
   dplyr::select( # forloebid,
-    extubation_novent,
+    # extubation_novent,
+    event,
     age,
     female,
     hypertension,
@@ -247,44 +45,44 @@ tbl1 <- ds_clean |>
     living_alone,
     nihss,
     mrs_pre,
-    tidyselect::ends_with("timediff"),
+    # tidyselect::ends_with("timediff"),
     location,
     compl_any,
     tici,
-    pacu_delay,
+    # pacu_extend,
     # pacu_delay_reason,
-    icu_direct,
-    pacu_saox_first,
-    pacu_mabp_first,
-    pacu_saox_last,
-    pacu_mabp_last,
-    pacu_ox_req,
-    pacu_events_type,
-    pacu_extend_type,
+    # icu_direct,
+    # pacu_saox_first,
+    # pacu_mabp_first,
+    # pacu_saox_last,
+    # pacu_mabp_last,
+    # pacu_ox_req,
+    # pacu_events_type,
+    # pacu_extend_type,
     nihss_24h,
     pneumonia,
-    ward_events_type,
+    # ward_events_type,
     # ward_events_other,
     mrs_3mdr,
     mors_hospital
   ) |>
   labelling_data() |>
   gtsummary::tbl_summary(
-    by = extubation_novent,
-    type = list(c(
-      pacu_saox_first,
-      pacu_mabp_first,
-      pacu_saox_last,
-      pacu_mabp_last,
-      pacu_ox_req
-    ) ~ "continuous2"),
-    digits = list(c(
-      pacu_saox_first,
-      pacu_mabp_first,
-      pacu_saox_last,
-      pacu_mabp_last,
-      pacu_ox_req
-    ) ~ 0),
+    by = event,
+    # type = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ "continuous2"),
+    # digits = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ 0),
     statistic = list(
       gtsummary::all_continuous() ~ "{median} ({p25}, {p75})",
       gtsummary::all_categorical() ~ "{n} ({p}%)"
@@ -311,6 +109,37 @@ tbl1 |>
 #   gt::gtsave(glue::glue("tbl1_{Sys.Date()}.docx"))
 ```
 
+```{r}
+# pak::pak("agdamsbo/REDCapCAST")
+
+missings_interest <- c("nihss_24h","mrs_3mdr","tici", "location", "compl_any")
+key_missings <- missings_interest |> lapply(\(.x){
+  is.na(ds_all[.x])
+}) |> 
+  dplyr::bind_cols() |> apply(1,any)
+
+## This should be exported to 
+# ds_all[key_missings,"forloebid"]
+
+df_missing <- ds_all[c(missings_interest)] |> dplyr::mutate(is_missing = NA,mrs_3mdr=REDCapCAST::as_factor(mrs_3mdr))
+
+meta_missing <- df_missing |>  REDCapCAST::ds2dd_detailed(form.name = "missing")
+
+REDCapCAST::create_instrument_meta(meta_missing$meta,dir = here::here(""),record.id = FALSE)
+
+missing_fraction <- function(data){
+  NROW(data[is.na(data)])/NROW(data)
+}
+
+ds_all |> sapply(missing_fraction)
+
+missing_map <- ds_all |> dplyr::mutate(year_date = factor(format(modafdankomst_datetime,"%Y-%m"))) |> 
+  dplyr::select(tidyselect::all_of(missings_interest),year_date) 
+
+missing_map |> missing_group_plot("year_date")
+```
+
+
 ## mRS stratified by groups
 
 Grotta bars of mRS shift post stroke
@@ -336,3 +165,44 @@ ds_all |>
     # returnData = TRUE
   )
 ```
+
+
+## Upload DANSTROKE and modified data
+
+```{r}
+# match("pacu_timediff",names(ds_clean))
+
+# for (i in seq_along(ds_clean)){
+#   name_label <- gsub("_"," ",names(ds_clean)[i]) |> stringr::str_to_sentence()
+#   
+#   if (identical("difftime",class(ds_clean[[i]]))){
+#     label <- glue::glue("{name_label} ({attr(x = ds_clean[[i]], which = 'units')})")
+#     
+#   } else {
+#     label <- name_label
+#   }
+#   
+#   if (is.null(attributes(ds_clean[[i]]))){
+#     old.attr <- list()
+#   } else {
+#     old.attr <- attributes(ds_clean[[i]])
+#   }
+#   
+#   attributes(ds_clean[[i]]) <- c(old.attr,label=label)
+#   
+# }
+
+# ds_upload <- ds_clean[c(1,25:ncol(ds_clean))]
+# 
+# dd <- REDCapCAST::ds2dd_detailed(ds_upload,form.name = "background")$meta
+# dd[-1,] |> REDCapCAST::export_redcap_instrument(file = here::here("background.zip"))
+# 
+# ds_upload_adj <- REDCapCAST::ds2dd_detailed(ds_upload,form.name = "background")$data
+
+# REDCapR::redcap_write(ds_upload_adj,
+#                       redcap_uri = "https://redcap.rm.dk/api/",
+#   token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+```
+
+
+

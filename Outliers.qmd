@@ -1,0 +1,103 @@
+---
+title: "Outliers"
+format: html
+---
+
+## Extremes and outliers
+
+Values above Q3 + 3xIQR or below Q1 - 3xIQR are considered as extreme points (or extreme outliers).
+
+I suggest excluding extreme values, not just outliers.
+
+They could also be kept as long as we are mainly concerned with medians.
+
+Flagging outliers from the EVT database, that needs inspection
+
+```{r}
+names(ds_all)[endsWith(names(ds_all), "timediff")][1:2] |>
+  lapply(\(.x){
+    rstatix::identify_outliers(
+      ds_all[c("forloebid", .x)], !!dplyr::sym(.x)
+    ) |>
+      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
+        forloebid = as.character(forloebid)
+      ) |>
+      dplyr::filter(is.extreme)
+  }) |>
+  lapply(\(.x){
+    .x |>
+      gt::gt() |>
+      gt::fmt_number(decimals = 1)
+  }) |>
+  setNames(c("Time at PACU", "Time at ICU")) |>
+  purrr::imap(\(.x, .i){
+    .x |> gt::gtsave(paste0("extremes_", gsub(" ", "_", .i), ".docx"))
+  })
+```
+
+Handling outliers from the Stroke database
+
+```{r}
+vars <- c(
+  "art2rep_timediff",
+  "ank2rep_timediff",
+  "onset2rep_timediff",
+  "art2procend_timediff",
+  "angio2art_timediff",
+  "mr2angio_timediff",
+  "admission_timediff"
+)
+
+
+outliers_l <- seq_along(vars) |>
+  lapply(\(.x){
+    rstatix::identify_outliers(
+      ds_all[c("forloebid", vars[.x])], !!dplyr::sym(vars[.x])
+    ) |>
+      dplyr::mutate(dplyr::across(dplyr::ends_with("_timediff"), as.numeric),
+        forloebid = as.character(forloebid)
+      )
+  }) |>
+  setNames(vars)
+
+outliers_l |>
+  lapply(\(.x){
+    .x |>
+      gt::gt() |>
+      gt::fmt_number(decimals = 1)
+  })
+
+ds_all$admission_timediff |> rstatix::is_extreme()
+
+ds_all[vars] |> skimr::skim()
+
+ds_clean <- ds_all |>
+  purrr::imap(\(.x, .i){
+    if (.i %in% vars) {
+      filter <- rstatix::is_outlier(.x, coef = 10) & !is.na(.x)
+      old <- .x
+      .x[filter] <- NA
+      out <- data.frame(.x, old, filter) |> setNames(c(.i, paste0(.i, "_old"), paste0(.i, "_filter")))
+    } else {
+      out <- .x
+    }
+    out
+  }) |>
+  dplyr::bind_cols()
+
+ds_clean$extreme_filtered <- apply(ds_clean[grep(pattern = "_filter$", names(ds_clean))], 1, any)
+
+ds_clean$extreme_filtered |> summary()
+
+vars |>
+  lapply(\(.x){
+    ds <- ds_clean[startsWith(names(ds_clean), .x)]
+
+    ds[2:3] |> dplyr::filter(!!dplyr::sym(names(ds)[3]))
+  })
+
+## Alternative approach
+ds_all |>
+  dplyr::mutate(dplyr::across(dplyr::all_of(vars), as.numeric)) |>
+  rempsyc::find_mad(vars,mad.scores = FALSE, criteria = 40)
+```

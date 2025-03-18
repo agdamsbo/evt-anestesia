@@ -28,7 +28,10 @@ Imports:
     officer,
     snakecase,
     stringr,
-    rstatix
+    rstatix,
+    consort,
+    rsvg,
+    DiagrammeRsvg
 Description: What the package does (one paragraph).
 License: CC BY 4.0
 Encoding: UTF-8

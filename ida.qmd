@@ -1,0 +1,280 @@
+---
+title: "ida"
+format: html
+---
+
+```{r setup}
+source(here::here("R/functions.R"))
+# source(here::here("R/data_ready.R"))
+```
+
+```{r}
+df_raw <- REDCapCAST::easy_redcap(
+  project.name = "EVT_ANEST",
+  uri = "https://redcap.rm.dk/api/",
+  fields = c(
+    "forloebid",
+    "modafdankomst_datetime",
+    "extubation_novent",
+    "icu_direct",
+    "reintubation_reason",
+    "pacu_arrival_date",
+    "pacu_arrival_time",
+    "pacu_saox_first",
+    "pacu_bp_sys_first",
+    "pacu_bp_dia_first",
+    "pacu_mabp_first",
+    "pacu_saox_last",
+    "pacu_bp_sys_last",
+    "pacu_bp_dia_last",
+    "pacu_mabp_last",
+    "pacu_ox_req",
+    "pacu_events",
+    "pacu_events_type",
+    "pacu_extend_type",
+    "pacu_dicharge_date",
+    "pacu_dicharge_time",
+    "reintubation_reason",
+    "pacu_extend",
+    "pacu_extend_type",
+    "ward_event_icu",
+    "ward_events_type",
+    "pneumonia",
+    "art2rep_timediff",
+    "ank2rep_timediff",
+    "onset2rep_timediff",
+    "art2procend_timediff",
+    "angio2art_timediff",
+    "mr2angio_timediff",
+    "admission_timediff",
+    "mors_hospital",
+    "location",
+    "tici",
+    "mrs_3mdr",
+    "mrs_3mdr_date",
+    "mors_date",
+    "compl_any",
+    "pacu_timediff",
+    "icu_timediff",
+    "age",
+    "female",
+    "onset_known",
+    "living_alone",
+    "nursing_home",
+    "alc_above",
+    "smoking",
+    "diabetes",
+    "afib",
+    "hypertension",
+    "tci",
+    "nihss",
+    "udskrsygkode_basisske",
+    "udskr_datetime",
+    "ami",
+    "ais",
+    "pad",
+    "mrs_pre",
+    "nihss_24h",
+    "event"
+  ),
+  raw_or_label = "both"
+)
+
+df <- df_raw |>
+  REDCapCAST::as_factor() |>
+  REDCapCAST::as_logical() |>
+  dplyr::as_tibble()
+```
+
+```{r}
+df_final <- df |> dplyr::mutate(
+  mors_hospital = ifelse(mors_date > as.Date(udskr_datetime),
+    "After discharge",
+    "During admission"
+  )
+)
+```
+
+## Baseline data
+
+```{r}
+tbl1 <- df_final |>
+  dplyr::filter(!is.na(extubation_novent)) |>
+  # dplyr::mutate(pacu_saox_last=as.numeric(pacu_saox_last)) |>
+  dplyr::select( # forloebid,
+    # extubation_novent,
+    event,
+    age,
+    female,
+    hypertension,
+    diabetes,
+    tci,
+    ais,
+    afib,
+    ami,
+    pad,
+    smoking,
+    alc_above,
+    living_alone,
+    nihss,
+    mrs_pre,
+    location,
+    compl_any,
+    tici,
+    nihss_24h,
+    pneumonia,
+    mrs_3mdr,
+    mors_hospital
+  ) |>
+  gtsummary::tbl_summary(
+    by = event,
+    # type = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ "continuous2"),
+    # digits = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ 0),
+    statistic = list(
+      gtsummary::all_continuous() ~ "{median} ({p25}, {p75})",
+      gtsummary::all_categorical() ~ "{n} ({p}%)"
+    )
+  ) |>
+  gtsummary::add_p() |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_overall()
+# tbl1
+
+tbl1 |>
+  gtsummary::as_gt() |>
+  gt::text_transform(
+    locations = gt::cells_row_groups(),
+    fn = function(x) {
+      lapply(x, function(x) {
+        gt::md(paste0("**", x, "**"))
+      })
+    }
+  )
+```
+
+```{r}
+tbl2 <- df_final |>
+  dplyr::filter(!is.na(extubation_novent)) |>
+  # dplyr::mutate(pacu_saox_last=as.numeric(pacu_saox_last)) |>
+  dplyr::select( # forloebid,
+    # extubation_novent,
+    event,
+    age,
+    female,
+    hypertension,
+    diabetes,
+    tci,
+    ais,
+    afib,
+    ami,
+    pad,
+    smoking,
+    alc_above,
+    living_alone,
+    nihss,
+    mrs_pre,
+    location,
+    compl_any,
+    tici,
+    nihss_24h,
+    pneumonia,
+    mrs_3mdr,
+    mors_hospital
+  ) |>
+  gtsummary::tbl_summary(
+    by = location,
+    # type = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ "continuous2"),
+    # digits = list(c(
+    #   pacu_saox_first,
+    #   pacu_mabp_first,
+    #   pacu_saox_last,
+    #   pacu_mabp_last,
+    #   pacu_ox_req
+    # ) ~ 0),
+    statistic = list(
+      gtsummary::all_continuous() ~ "{median} ({p25}, {p75})",
+      gtsummary::all_categorical() ~ "{n} ({p}%)"
+    )
+  ) |>
+  gtsummary::add_p() |>
+  gtsummary::bold_labels() |>
+  gtsummary::add_overall()
+# tbl1
+
+tbl2 |>
+  gtsummary::as_gt() |>
+  gt::text_transform(
+    locations = gt::cells_row_groups(),
+    fn = function(x) {
+      lapply(x, function(x) {
+        gt::md(paste0("**", x, "**"))
+      })
+    }
+  )
+```
+
+```{r}
+df_final |> dplyr::mutate(year_date = factor(format(modafdankomst_datetime,"%Y-%m"))) |> 
+  dplyr::select(mrs_3mdr,tici,year_date) |> 
+  missing_group_plot("year_date")
+```
+
+
+
+```{r}
+df_final |> flowchart()
+
+summary(df_final |>
+  # dplyr::filter(!is.na(extubation_novent)) |>
+  dplyr::pull(event))
+```
+
+
+
+```{r}
+## Transfering event data
+# df_final$event_raw <- dplyr::select(df_event, extubation_novent, pacu_events, pacu_extend, ward_event_icu) |>
+#   # dplyr::filter(is.na(extubation_novent)) |>
+#   dplyr::mutate(extubation_novent = !extubation_novent) |>
+#   apply(1, \(.x){
+#     .x <- .x[!is.na(.x)]
+#     if (length(.x) == 0) {
+#       NA
+#     } else {
+#       any(.x)
+#     }
+#   })
+# 
+# df_event <- df_final |>
+#   dplyr::mutate(
+#     event = factor(dplyr::if_else(event_raw, true = "Complicated", false = "Smooth", missing = NA))
+#   )
+# 
+# df_event$event |> summary()
+# 
+# df_event[c("forloebid", "event")] |>
+#   dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric)) |>
+#   REDCapR::redcap_write(
+#     redcap_uri = "https://redcap.rm.dk/api/",
+#     token = keyring::key_get("EVT_ANEST_REDCAP_API"), 
+#     overwrite_with_blanks = TRUE
+#   )
+```
