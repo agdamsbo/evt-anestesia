@@ -890,6 +890,8 @@ var_labels <- function() {
     art2procend_timediff = "Time from artery puncture to procedure termination (minutes)",
     angio2art_timediff = "Time from angio suite arrival to artery puncture (minutes)",
     mr2angio_timediff = "Time from MR arrival to angio suite arrival (minutes)",
+    angio2rep_timediff = "Angio suite to reperfusion (minutes)",
+    angio2procend_timediff = "Angio suite to end of procedure (minutes)",
     pacu_delay = "Reason for PACU delay",
     icu_direct = "Reason for direct ICU transfer",
     pacu_mabp_first = "First MABP in PACU",
@@ -1117,7 +1119,7 @@ flowchart <- function(data, export.path = NULL) {
   ds <- data |> 
     dplyr::mutate(
       # Missing tables
-      missing_data = factor(dplyr::if_else(is.na(extubation_novent),"Missing data",NA,missing = "Missing data")),
+      missing_data = excluded,
       # Direct PACU
       direct_pacu=!extubation_novent,
       # Corrected PACU extension definition
@@ -1125,14 +1127,13 @@ flowchart <- function(data, export.path = NULL) {
       pacu_extend_exp = is.na(pacu_extend_type) | is.na(pacu_events_type),
       # Redefine after review
       ward_event_icu_type = dplyr::if_else(ward_event_icu,ward_events_type,NA),
-      
       pneumonia_ward = dplyr::if_else(pneumonia,"Treated",NA)
     )
   
   out <- ds |> consort::consort_plot(
     orders = c(
       forloebid = "All subjects",
-      missing_data = "Missing papers",
+      missing_data = "Missings",
       forloebid = "Available subjects",
       icu_direct = "Direct ICU transfer",
       direct_pacu = "Directly to PACU",
@@ -1166,7 +1167,7 @@ flowchart <- function(data, export.path = NULL) {
       out |> export_consort_dot(path = export.path)
     }
   } else {
-    plot(out)
+    out
   }
 }
 
@@ -1191,4 +1192,214 @@ export_consort_dot <- function(data, path) {
   ls <- data |>
     consort:::plot.consort(grViz = TRUE)
   writeLines(ls$x$diagram, con = here::here(path))
+}
+
+name2label <- function(data){
+  ds_clean <- data
+  for (i in seq_along(ds_clean)) {
+    name_label <- gsub("_", " ", names(ds_clean)[i]) |> stringr::str_to_sentence()
+    
+    if (identical("difftime", class(ds_clean[[i]]))) {
+      label <- glue::glue("{name_label} ({attr(x = ds_clean[[i]], which = 'units')})")
+    } else {
+      label <- name_label
+    }
+    
+    if (is.null(attributes(ds_clean[[i]]))) {
+      old.attr <- list()
+    } else {
+      old.attr <- attributes(ds_clean[[i]])
+    }
+    
+    attributes(ds_clean[[i]]) <- c(old.attr, label = label)
+  }
+  ds_clean
+}
+
+data_ida <- function(){
+  REDCapCAST::easy_redcap(
+    project.name = "EVT_ANEST",
+    uri = "https://redcap.rm.dk/api/",
+    fields = c(
+      "forloebid",
+      "modafdankomst_datetime",
+      "excluded",
+      "extubation_novent",
+      "icu_direct",
+      "reintubation_reason",
+      "pacu_arrival_date",
+      "pacu_arrival_time",
+      "pacu_saox_first",
+      "pacu_bp_sys_first",
+      "pacu_bp_dia_first",
+      "pacu_mabp_first",
+      "pacu_saox_last",
+      "pacu_bp_sys_last",
+      "pacu_bp_dia_last",
+      "pacu_mabp_last",
+      "pacu_ox_req",
+      "pacu_events",
+      "pacu_events_type",
+      "pacu_extend_type",
+      "pacu_dicharge_date",
+      "pacu_dicharge_time",
+      "reintubation_reason",
+      "pacu_extend",
+      "pacu_extend_type",
+      "ward_event_icu",
+      "ward_events_type",
+      "pneumonia",
+      "art2rep_timediff",
+      "ank2rep_timediff",
+      "onset2rep_timediff",
+      "art2procend_timediff",
+      "angio2art_timediff",
+      "mr2angio_timediff",
+      "angio2rep_timediff",
+      "angio2procend_timediff",
+      "admission_timediff",
+      "mors_hospital",
+      "location",
+      "tici",
+      "mrs_3mdr",
+      "mrs_3mdr_date",
+      "mors_date",
+      "compl_any",
+      "pacu_timediff",
+      "icu_timediff",
+      "age",
+      "female",
+      "onset_known",
+      "living_alone",
+      "nursing_home",
+      "alc_above",
+      "smoking",
+      "diabetes",
+      "afib",
+      "hypertension",
+      "tci",
+      "nihss",
+      "udskrsygkode_basisske",
+      "udskr_datetime",
+      "ami",
+      "ais",
+      "pad",
+      "mrs_pre",
+      "nihss_24h",
+      "event"
+    ),
+    raw_or_label = "both"
+  )
+}
+
+merged_data <- function(){
+  ds_evt <- REDCapR::redcap_read(
+    redcap_uri = "https://redcap.rm.dk/api/",
+    token = keyring::key_get("EVT_ANEST_REDCAP_API"),
+    fields = c(
+      "forloebid",
+      "extubation_novent",
+      "excluded",
+      # "pacu_delay",
+      # "pacu_delay_reason",
+      "icu_direct",
+      "reintubation_reason",
+      "pacu_arrival_date",
+      "pacu_arrival_time",
+      "pacu_saox_first",
+      "pacu_bp_sys_first",
+      "pacu_bp_dia_first",
+      "pacu_mabp_first",
+      "pacu_saox_last",
+      "pacu_bp_sys_last",
+      "pacu_bp_dia_last",
+      "pacu_mabp_last",
+      "pacu_ox_req",
+      "pacu_events_type",
+      "pacu_extend_type",
+      "pacu_dicharge_date",
+      "pacu_dicharge_time",
+      "reintubation_reason",
+      "pacu_extend",
+      "pacu_extend_type",
+      "icu_arrival_date",
+      "icu_arrival_time",
+      "icu_dicharge_date",
+      "icu_dicharge_time",
+      "ward_events",
+      "ward_event_icu",
+      "ward_events_type",
+      "ward_events_other",
+      "pneumonia"
+    ),
+    raw_or_label = "label"
+  ) |>
+    purrr::pluck("data")
+  
+  # dd <- REDCapR::redcap_metadata_read(
+  #   redcap_uri = "https://redcap.rm.dk/api/",
+  #   token = keyring::key_get("EVT_ANEST_REDCAP_API"))
+  # 
+  # dd$data |> View()
+  # 
+  # dd$data$field_name[54:73]
+  
+  ds_clin <- ds_evt |> evt_clinical_data()
+  
+  # ds_clin |> dplyr::select(tidyselect::contains("doed")) |> skimr::skim()
+  
+  ds_format <- ds_clin |>
+    format_all() |>
+    dplyr::rename(
+      nihss = nihss_basisske
+    ) |>
+    merge_dato_tid()
+  
+  ds_all <- dplyr::left_join(
+    ds_evt |>
+      merge_date_time() |>
+      format_all(fmt.lst = evt_redcap_format_dic()),
+    ds_format
+  ) |>
+    dplyr::mutate(
+      art2rep_timediff = difftime(tidreperf_datetime, artpunkt_datetime, units = "mins"),
+      ank2rep_timediff = difftime(tidreperf_datetime, modafdankomst_datetime, units = "mins"),
+      onset2rep_timediff = difftime(tidreperf_datetime, symptdebexact_datetime, units = "mins"),
+      art2procend_timediff = difftime(procafsl_datetime, artpunkt_datetime, units = "mins"),
+      angio2art_timediff = difftime(artpunkt_datetime, ankneurorad_datetime, units = "mins"),
+      mr2angio_timediff = difftime(ankneurorad_datetime, ankomstevtctmr_datetime, units = "mins"),
+      admission_timediff = difftime(udskr_datetime, modafdankomst_datetime, units = "days"),
+      angio2rep_timediff = difftime(tidreperf_datetime, ankneurorad_datetime, units = "mins"),
+      angio2procend_timediff = difftime(procafsl_datetime, ankneurorad_datetime, units = "mins"),
+      mors_hospital = ifelse(mors_date > as.Date(udskr_datetime), "After discharge", "During admission")
+    ) |>
+    (\(.x){
+      any_compl <- apply(dplyr::select(.x, dplyr::starts_with("compl_"), -dplyr::ends_with("text")), 1, \(.y){
+        if (all(is.na(.y))){
+          out <- NA
+        } else {
+          out <- any(.y[!is.na(.y)])
+        }
+        out
+      })
+      
+      dplyr::bind_cols(.x,
+                       compl_any = any_compl
+      )
+    })() |>
+    dplyr::mutate(location = dplyr::case_when(
+      trombelokva_trombekt | trombelokba_trombekt | trombelokpca_trombekt ~ "posterior",
+      trombelokingen_trombekt ~ "none",
+      trombelokcca_trombekt | trombelokica_trombekt | trombelokica_t_trombekt | trombelokmca1_trombekt | trombelokmca2_trombekt | trombelokaca_trombekt | trombelokcervical_trombekt ~ "anterior",
+      .default = NA
+    ))  |> REDCapCAST::as_logical() |> 
+    dplyr::mutate(
+      event = dplyr::if_else(!extubation_novent | pacu_extend | ward_event_icu | !is.na(reintubation_reason),true = TRUE,false = FALSE,missing = FALSE),
+      event = factor(dplyr::case_when(
+        event ~ "Complicated",
+        .default = "Smooth"
+      ))
+    )
+  
+  ds_all
 }

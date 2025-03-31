@@ -31,7 +31,9 @@ Imports:
     rstatix,
     consort,
     rsvg,
-    DiagrammeRsvg
+    DiagrammeRsvg,
+    DiagrammeR,
+    ggsurvfit
 Description: What the package does (one paragraph).
 License: CC BY 4.0
 Encoding: UTF-8

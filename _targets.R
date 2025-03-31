@@ -46,19 +46,20 @@ tar_option_set(
 
 # Run the R scripts in the R/ folder with your custom functions:
 tar_source()
+source(here::here("R/functions.R"))
 # tar_source("other_functions.R") # Source other scripts as needed.
 
 # Replace the target list below with your own:
 list(
   tar_target(
-    name = df_evt_minimal,
-    command = get_evt_base(),
-    description = "Minimal data for ID identification"
+    name = data_merge,
+    command = merged_data(),
+    description = "Merged data"
   ),
   tar_target(
-    name = df_evt_basis,
-    command = evt_basis_data(df_evt_minimal),
+    name = data_for_ida,
+    command = data_ida(),
     # cue = targets::tar_cue(mode="always"),
-    description = "Basic data for EVT database"
+    description = "Data for Ida"
   )
 )
