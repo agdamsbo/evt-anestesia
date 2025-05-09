@@ -33,62 +33,9 @@ targets::tar_source(files = here::here("_targets"))
 
 
 ```{r}
-#| echo: false
-df_raw <- targets::tar_read("data_for_ida")
-ds_all <- targets::tar_read("data_merge")
-
-df <- df_raw |>
-  REDCapCAST::as_factor() |>
-  REDCapCAST::as_logical() |>
-  dplyr::as_tibble()
-
-df <- ds_all |>
-  dplyr::mutate(ivt = !is.na(startlyse_datetime)) |>
-  dplyr::select(forloebid, ivt, sidstopdateret_tremdrop) |>
-  dplyr::right_join(df)
+source(here::here("R/data_ready.R"))
 ```
 
-```{r}
-df_final <- df |>
-  dplyr::mutate(
-    mors_hospital = ifelse(mors_date > as.Date(udskr_datetime),
-      "After discharge",
-      "During admission"
-    ),
-    excluded = dplyr::case_when(
-      excluded=="Yes"~ "Missing data",
-      !is.na(excluded) ~ excluded,
-      is.na(extubation_novent) ~ "Missing data",
-      age < 18 ~ "Age <18 years",
-      # Only one true duplication, which did not have data registered
-      # as.character(forloebid) %in% duplet ~ "Duplication",
-      .default = NA
-    ),
-    location = factor(location),
-    mrs_3mdr_group = cut(as.numeric(mrs_3mdr), breaks = c(0, 3, Inf), labels = c("0-2", "3-6"), right = FALSE),
-    mrs_pre_num = as.numeric(mrs_pre),
-    mrs_3mdr_num = as.numeric(mrs_3mdr),
-    tici_group = dplyr::if_else(tici %in% c("2b", "2c", "3"), "2b-3", "0-2a"),
-    tici_group = dplyr::if_else(is.na(tici), NA, tici_group),
-    ward_event_icu_type = dplyr::if_else(ward_event_icu, ward_events_type, NA),
-    event_type = dplyr::case_when(
-      !is.na(icu_direct) ~ "Directly to ICU",
-      !is.na(pacu_events_type) ~ "PACU to ICU transfer",
-      !is.na(pacu_extend_type) ~ "PACU extention",
-      !is.na(ward_event_icu_type) ~ "Ward to ICU transfer"
-    ),
-    event_type = factor(
-      event_type,
-      levels = c(
-        "Directly to ICU",
-        "PACU to ICU transfer",
-        "PACU extention",
-        "Ward to ICU transfer"
-      )
-    )
-  ) |>
-  labelling_data()
-```
 
 ## Flowchart
 
@@ -101,6 +48,14 @@ df_final |> flowchart(export.path = "flow.png")
 ```
 
 ![](flow.png)
+
+### No extubation details
+
+```{r}
+df_final |>
+  dplyr::filter(!is.na(icu_direct_no_extubation)) |>
+  gtsummary::tbl_summary(include = icu_direct_no_extubation)
+```
 
 ## Baseline data by event/no event
 
@@ -233,7 +188,7 @@ tbl2 <- df_final |>
   gtsummary::bold_labels()
 # tbl1
 
-tbl2 |>
+tbl2_final <- tbl2 |>
   gtsummary::as_gt() |>
   gt::text_transform(
     locations = gt::cells_row_groups(),
@@ -243,6 +198,9 @@ tbl2 |>
       })
     }
   )
+
+tbl2_final
+# tbl2_final |> gt::gtsave("evt_tbl2.docx")
 ```
 
 ```{r}
@@ -298,85 +256,4 @@ df_final |>
   gtsummary::modify_source_note("Physiological meassures in PACU of all non-event patients.")
 ```
 
-## Kaplan-Mayer
 
-```{r}
-# Time censor cut-off
-# Censoring events more than 120 dauys after hospital admittance
-time_cap <- 120
-
-df_surv <- df_final |>
-  dplyr::mutate(
-    dplyr::across(c("sidstopdateret_tremdrop", "mrs_3mdr_date", "modafdankomst_datetime"), as.Date),
-    tremdrop_date = dplyr::if_else(
-      is.na(mrs_3mdr_date),
-      sidstopdateret_tremdrop,
-      mrs_3mdr_date
-    ),
-    time_raw = ifelse(
-      is.na(mors_date),
-      difftime(tremdrop_date, modafdankomst_datetime, units = "days"),
-      difftime(mors_date, modafdankomst_datetime, units = "days")
-    ),
-    status_raw = as.numeric(!is.na(mors_date)),
-    time = dplyr::if_else(time_raw > time_cap, time_cap, time_raw),
-    status = dplyr::if_else(time_raw > time_cap, 0, status_raw)
-  )
-
-# dplyr::select(df_surv,sidstopdateret_tremdrop,mrs_3mdr_date,mors_date,tremdrop_date,modafdankomst_datetime,time_raw) |> View()
-# df_surv |> dplyr::group_by(status_raw) |>
-#   dplyr::summarise(median = median(time_raw,na.rm=TRUE),
-#                    p75 = quantile(time_raw,na.rm=TRUE,probs = .75))
-```
-
-```{r}
-surv_model <- ggsurvfit::survfit2(survival::Surv(time, status) ~ location, data = dplyr::filter(df_surv, location != "none"))
-
-# gtsummary::tbl_survfit(surv_model, times=c(0,20,120))
-
-p_surv <- surv_model |>
-  ggsurvfit::ggsurvfit() +
-  ggsurvfit::add_confidence_interval() +
-  ggsurvfit::add_risktable() +
-  ggsurvfit::scale_ggsurvfit() +
-  ggplot2::labs(
-    title = "Survival plot of EVT patients by location",
-    y = "Percentage survival",
-    x = "Time (days)"
-  ) +
-  ggplot2::coord_cartesian(xlim = c(0, 120))
-
-ggplot2::ggsave(filename = "surv_plot.png", plot = p_surv, height = 14, width = 14, units = "cm", dpi = 300, scale = 1)
-```
-
-![](surv_plot.png)
-
-```{r}
-## Transfering event data
-# df_final$event_raw <- dplyr::select(df_event, extubation_novent, pacu_events, pacu_extend, ward_event_icu) |>
-#   # dplyr::filter(is.na(extubation_novent)) |>
-#   dplyr::mutate(extubation_novent = !extubation_novent) |>
-#   apply(1, \(.x){
-#     .x <- .x[!is.na(.x)]
-#     if (length(.x) == 0) {
-#       NA
-#     } else {
-#       any(.x)
-#     }
-#   })
-#
-# df_event <- df_final |>
-#   dplyr::mutate(
-#     event = factor(dplyr::if_else(event_raw, true = "Complicated", false = "Smooth", missing = NA))
-#   )
-#
-# df_event$event |> summary()
-#
-# df_event[c("forloebid", "event")] |>
-#   dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric)) |>
-#   REDCapR::redcap_write(
-#     redcap_uri = "https://redcap.rm.dk/api/",
-#     token = keyring::key_get("EVT_ANEST_REDCAP_API"),
-#     overwrite_with_blanks = TRUE
-#   )
-```

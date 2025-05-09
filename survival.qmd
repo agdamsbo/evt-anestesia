@@ -1,0 +1,151 @@
+---
+title: "survival"
+format: docx
+---
+
+```{r setup}
+source(here::here("R/functions.R"))
+targets::tar_source(files = here::here("_targets"))
+# source(here::here("R/data_ready.R"))
+```
+
+```{r}
+source(here::here("R/data_ready.R"))
+```
+
+
+## Kaplan-Mayer
+
+```{r}
+# Time censor cut-off
+# Censoring events more than 120 dauys after hospital admittance
+time_cap <- 120
+
+df_surv <- df_final |>
+  dplyr::mutate(
+    dplyr::across(c("sidstopdateret_tremdrop", "mrs_3mdr_date", "modafdankomst_datetime"), as.Date),
+    tremdrop_date = dplyr::if_else(
+      is.na(mrs_3mdr_date),
+      sidstopdateret_tremdrop,
+      mrs_3mdr_date
+    ),
+    time_raw = ifelse(
+      is.na(mors_date),
+      difftime(tremdrop_date, modafdankomst_datetime, units = "days"),
+      difftime(mors_date, modafdankomst_datetime, units = "days")
+    ),
+    status_raw = as.numeric(!is.na(mors_date)),
+    time = dplyr::if_else(time_raw > time_cap, time_cap, time_raw) + 1,
+    status = dplyr::if_else(time_raw > time_cap, 0, status_raw)
+  )
+
+# dplyr::select(df_surv,sidstopdateret_tremdrop,mrs_3mdr_date,mors_date,tremdrop_date,modafdankomst_datetime,time_raw) |> View()
+# df_surv |> dplyr::group_by(status_raw) |>
+#   dplyr::summarise(median = median(time_raw,na.rm=TRUE),
+#                    p75 = quantile(time_raw,na.rm=TRUE,probs = .75))
+```
+
+```{r}
+surv_model <- ggsurvfit::survfit2(survival::Surv(time, status) ~ location, data = dplyr::filter(df_surv, location != "none"))
+
+# gtsummary::tbl_survfit(surv_model, times=c(0,20,120))
+
+p_surv <- surv_model |>
+  ggsurvfit::ggsurvfit() +
+  ggsurvfit::add_confidence_interval() +
+  ggsurvfit::add_risktable() +
+  ggsurvfit::scale_ggsurvfit() +
+  ggplot2::labs(
+    title = "Survival plot of EVT patients by location",
+    y = "Percentage survival",
+    x = "Time (days)"
+  ) +
+  ggplot2::coord_cartesian(xlim = c(0, 120))
+
+ggplot2::ggsave(filename = "surv_plot.png", plot = p_surv, height = 14, width = 14, units = "cm", dpi = 300, scale = 1)
+```
+
+![](surv_plot.png)
+
+# Cox regression analysis
+
+```{r}
+library(survival)
+# pak::pak("agdamsbo/FreesearchR")
+
+df_cox <- dplyr::filter(df_surv, location != "none") |> 
+    REDCapCAST::fct_drop() |> 
+    dplyr::select(time, status, age, female, tici, location, pneumonia, mrs_pre) |> 
+  dplyr::mutate(mrs_pre = factor(mrs_pre))
+
+cox_mod <- with(
+  df_cox,
+  survival::coxph(survival::Surv(time, status) ~ age + female + tici + location + pneumonia + mrs_pre)
+)
+
+cox_tbl_uni <- gtsummary::tbl_uvregression(
+  df_cox, 
+  method = survival::coxph, y = Surv(time, status), exponentiate = TRUE)
+
+cox_tbl <- gtsummary::tbl_regression(cox_mod, exponentiate = TRUE)
+
+ls_cox <- list("Univariable"=cox_tbl_uni,"Multivariable"=cox_tbl)
+
+ls_cox |> FreesearchR::tbl_merge()
+
+p_merge <- ls_cox |> 
+  lapply(FreesearchR:::plot.tbl_regression) |> 
+  patchwork::wrap_plots(guides = "collect",axes = "collect")
+
+p_cox_surv <- with(
+  dplyr::filter(df_cox, location != "none") |> REDCapCAST::fct_drop(),
+  survival::coxph(survival::Surv(time, status) ~ age + tici + strata(location) + female + pneumonia)
+) |>
+  ggsurvfit::survfit2() |>
+  ggsurvfit::ggsurvfit() +
+  ggsurvfit::add_confidence_interval() +
+  ggsurvfit::add_risktable() +
+  ggsurvfit::scale_ggsurvfit() +
+  ggplot2::labs(
+    title = "Survival plot of EVT patients by location",
+    y = "Percentage survival",
+    x = "Time (days)"
+  ) +
+  ggplot2::coord_cartesian(xlim = c(0, 120))
+
+ggplot2::ggsave(filename = "cox_surv_plot.png", plot = p_cox_surv, height = 14, width = 14, units = "cm", dpi = 300, scale = 1)
+```
+
+Cox regression survival plot
+
+![](cox_surv_plot.png)
+
+```{r}
+## Transfering event data
+# df_final$event_raw <- dplyr::select(df_event, extubation_novent, pacu_events, pacu_extend, ward_event_icu) |>
+#   # dplyr::filter(is.na(extubation_novent)) |>
+#   dplyr::mutate(extubation_novent = !extubation_novent) |>
+#   apply(1, \(.x){
+#     .x <- .x[!is.na(.x)]
+#     if (length(.x) == 0) {
+#       NA
+#     } else {
+#       any(.x)
+#     }
+#   })
+#
+# df_event <- df_final |>
+#   dplyr::mutate(
+#     event = factor(dplyr::if_else(event_raw, true = "Complicated", false = "Smooth", missing = NA))
+#   )
+#
+# df_event$event |> summary()
+#
+# df_event[c("forloebid", "event")] |>
+#   dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric)) |>
+#   REDCapR::redcap_write(
+#     redcap_uri = "https://redcap.rm.dk/api/",
+#     token = keyring::key_get("EVT_ANEST_REDCAP_API"),
+#     overwrite_with_blanks = TRUE
+#   )
+```

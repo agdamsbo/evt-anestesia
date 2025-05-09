@@ -59,7 +59,7 @@ list(
   tar_target(
     name = data_for_ida,
     command = data_ida(),
-    # cue = targets::tar_cue(mode="always"),
+    cue = targets::tar_cue(mode="always"),
     description = "Data for Ida"
   )
 )

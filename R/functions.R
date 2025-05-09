@@ -1006,7 +1006,7 @@ labelling_data <- function(data, label.list = var_labels()) {
   labs <- subset_named_labels(names(data), label.list)
   labs[is.na(labs)] <- names(data)[is.na(labs)]
 
-  data |> assign_labels(labels = labs)
+  REDCapCAST::set_attr(data = data,label = labs,attr = "label")
 }
 
 get_label <- function(vars = "pase_0") {
@@ -1226,6 +1226,7 @@ data_ida <- function(){
       "excluded",
       "extubation_novent",
       "icu_direct",
+      "icu_direct_no_extubation",
       "reintubation_reason",
       "pacu_arrival_date",
       "pacu_arrival_time",
@@ -1303,6 +1304,7 @@ merged_data <- function(){
       # "pacu_delay",
       # "pacu_delay_reason",
       "icu_direct",
+      "icu_direct_no_extubation",
       "reintubation_reason",
       "pacu_arrival_date",
       "pacu_arrival_time",
